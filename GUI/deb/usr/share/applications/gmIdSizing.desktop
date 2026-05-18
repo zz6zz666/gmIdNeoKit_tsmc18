@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=gmIdSizing
+Comment=Gm/Id MOS Transistor Sizing Tool
+Exec=/opt/gmIdSizing/gmIdSizing
+Icon=gmIdSizing
+Terminal=false
+Categories=Electronics;Engineering;Science;

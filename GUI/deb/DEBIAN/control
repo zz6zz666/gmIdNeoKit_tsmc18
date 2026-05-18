@@ -1,0 +1,11 @@
+Package: gmIdSizing
+Version: 0.2
+Section: electronics
+Priority: optional
+Architecture: amd64
+Depends: libc6 (>= 2.17), libgl1, libxcb1, libfreetype6, libfontconfig1
+Maintainer: Fengqi Zhang
+Description: Gm/Id MOS Transistor Sizing GUI Tool
+ A PyQt5-based GUI application for sizing MOS transistors
+ using the Gm/Id methodology. Supports lookup table interpolation
+ and optimization for analog IC design.

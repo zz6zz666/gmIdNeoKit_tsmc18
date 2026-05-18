@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=gmIdSizing
+Comment=Gm/Id MOS Transistor Sizing Tool
+Exec=python3 /home/zz6zz666/桌面/GUI/runGmIdSizing.py
+Path=/home/zz6zz666/桌面/GUI
+Icon=/home/zz6zz666/桌面/GUI/gmId.png
+Terminal=false
+StartupWMClass=gmIdSizing
+Categories=Electronics;Engineering;Science;

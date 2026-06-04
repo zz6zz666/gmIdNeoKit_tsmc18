@@ -25,7 +25,12 @@ def save_mat(filename, data_dict):
                 dt = h5py.string_dtype()
                 f.create_dataset(k, data=v, dtype=dt)
             else:
-                f.create_dataset(k, data=np.array(v))
+                arr = np.array(v)
+                if arr.ndim >= 4:
+                    chunks = (1,) + arr.shape[1:-1] + (1,)
+                    f.create_dataset(k, data=arr, chunks=chunks)
+                else:
+                    f.create_dataset(k, data=arr)
     print('  -> %s.mat' % filename)
 
 
@@ -57,7 +62,7 @@ def extract_one(raw_dir, c):
     noise_files = sorted([f for f in os.listdir(raw_dir) if f.endswith(".noise")])
     if noise_files:
         noise_data = [_parse_noise_psf(os.path.join(raw_dir, f)) for f in noise_files]
-        nfiles = len(noise_files)
+        nfiles = len(noise_data)
 
         for k, (sig, _) in enumerate(c['n_noise']):
             trace_name = sig.split(":")[0]
@@ -65,11 +70,18 @@ def extract_one(raw_dir, c):
             nv = []
             for nd in noise_data:
                 if field_name and trace_name in nd and isinstance(nd[trace_name], dict):
-                    nv.append(nd[trace_name].get(field_name, 0.0))
-                elif trace_name in nd and isinstance(nd[trace_name], (int, float)):
+                    field_vals = nd[trace_name].get(field_name, [])
+                    if isinstance(field_vals, list):
+                        nv.append(field_vals)
+                    else:
+                        nv.append([field_vals])
+                elif trace_name in nd and isinstance(nd[trace_name], list):
                     nv.append(nd[trace_name])
+                elif trace_name in nd and isinstance(nd[trace_name], (int, float)):
+                    nv.append([nd[trace_name]])
             if len(nv) == nfiles:
-                noise_n[c['outvars_noise'][k]] = np.array(nv, dtype=np.float64)
+                arr = np.array(nv, dtype=np.float64)
+                noise_n[c['outvars_noise'][k]] = arr
 
         for k, (sig, _) in enumerate(c['p_noise']):
             trace_name = sig.split(":")[0]
@@ -77,11 +89,18 @@ def extract_one(raw_dir, c):
             nv = []
             for nd in noise_data:
                 if field_name and trace_name in nd and isinstance(nd[trace_name], dict):
-                    nv.append(nd[trace_name].get(field_name, 0.0))
-                elif trace_name in nd and isinstance(nd[trace_name], (int, float)):
+                    field_vals = nd[trace_name].get(field_name, [])
+                    if isinstance(field_vals, list):
+                        nv.append(field_vals)
+                    else:
+                        nv.append([field_vals])
+                elif trace_name in nd and isinstance(nd[trace_name], list):
                     nv.append(nd[trace_name])
+                elif trace_name in nd and isinstance(nd[trace_name], (int, float)):
+                    nv.append([nd[trace_name]])
             if len(nv) == nfiles:
-                noise_p[c['outvars_noise'][k]] = np.array(nv, dtype=np.float64)
+                arr = np.array(nv, dtype=np.float64)
+                noise_p[c['outvars_noise'][k]] = arr
 
     return dc_n, dc_p, noise_n, noise_p
 
@@ -107,7 +126,7 @@ def make_mat_data(c, L_arr):
     return d
 
 
-def extract_corner(corner, fine, outdir, l_range, voltage):
+def extract_corner(corner, fine, outdir, l_range, voltage, srcdir=None):
     if voltage == '5v':
         from config_tsmc18_5v import get_config
     else:
@@ -117,7 +136,7 @@ def extract_corner(corner, fine, outdir, l_range, voltage):
     nVGS = len(c['VGS'])
     nVDS = len(c['VDS'])
     nVSB = len(c['VSB'])
-    rundir_base = os.path.join(outdir, c['rundir_base'])
+    rundir_base = os.path.join(srcdir if srcdir else outdir, c['rundir_base'])
 
     if voltage == '5v':
         L_n = c['LENGTH']
@@ -152,6 +171,7 @@ def extract_corner(corner, fine, outdir, l_range, voltage):
     if not append_mode:
         print('  Creating: %s.mat' % fn_n)
         print('  Creating: %s.mat' % fn_p)
+        os.makedirs(outdir, exist_ok=True)
         save_mat(fn_n, make_mat_data(c, L_n))
         save_mat(fn_p, make_mat_data(c, L_p))
     else:
@@ -160,42 +180,63 @@ def extract_corner(corner, fine, outdir, l_range, voltage):
     t0 = time.time()
     processed = 0
 
+    nout = len(c['outvars'])
+    nout_noise = len(c['outvars_noise'])
+
     with h5py.File(fn_n + '.mat', 'r+') as f_n, \
          h5py.File(fn_p + '.mat', 'r+') as f_p:
 
         for ii in range(l_start, l_end):
             lval = all_L[ii]
+
+            buf_n = {v: np.zeros((nVSB, nVDS, nVGS)) for v in c['outvars']}
+            buf_p = {v: np.zeros((nVSB, nVDS, nVGS)) for v in c['outvars']}
+            buf_n_noise = {v: np.full((nVSB, nVDS, nVGS), np.nan) for v in c['outvars_noise']}
+            buf_p_noise = {v: np.full((nVSB, nVDS, nVGS), np.nan) for v in c['outvars_noise']}
+
             for j in range(nVSB):
                 raw_dir = '%s/L%03d_%.3fum_VSB%03d_%+.2fV.raw' % (
                     rundir_base, ii, lval, j, c['VSB'][j])
 
                 t1 = time.time()
-                dc_n, dc_p, noise_n, noise_p = extract_one(raw_dir, c)
+                try:
+                    dc_n, dc_p, noise_n, noise_p = extract_one(raw_dir, c)
+                except Exception as e:
+                    print(' [%s] L=%.3fum VSB=%+.2fV ... SKIPPED (%s)' %
+                          (c['corner'], lval, c['VSB'][j], str(e)[:50]))
+                    continue
                 elapsed = time.time() - t1
 
                 if lval in idx_n:
-                    in_n = idx_n[lval]
                     for vname, vals in dc_n.items():
-                        f_n[vname][j, :, :, in_n] = vals
+                        buf_n[vname][j, :, :] = vals
                     for vname, vals in noise_n.items():
-                        nfiles = len(vals)
-                        out = np.broadcast_to(
-                            vals.reshape(1, nfiles), (nVGS, nfiles)).T
-                        f_n[vname][j, :, :, in_n] = out
+                        buf_n_noise[vname][j, :, :] = vals
 
                 if lval in idx_p:
-                    ip = idx_p[lval]
                     for vname, vals in dc_p.items():
-                        f_p[vname][j, :, :, ip] = vals
+                        buf_p[vname][j, :, :] = vals
                     for vname, vals in noise_p.items():
-                        nfiles = len(vals)
-                        out = np.broadcast_to(
-                            vals.reshape(1, nfiles), (nVGS, nfiles)).T
-                        f_p[vname][j, :, :, ip] = out
+                        buf_p_noise[vname][j, :, :] = vals
 
                 processed += 1
                 print(' [%s] L=%.3fum VSB=%+.2fV ... OK (%.1fs)' %
                       (c['corner'], lval, c['VSB'][j], elapsed))
+
+            # Batch write all VSB at once per L
+            if lval in idx_n:
+                in_n = idx_n[lval]
+                for vname in c['outvars']:
+                    f_n[vname][:, :, :, in_n] = buf_n[vname]
+                for vname in c['outvars_noise']:
+                    f_n[vname][:, :, :, in_n] = buf_n_noise[vname]
+
+            if lval in idx_p:
+                ip = idx_p[lval]
+                for vname in c['outvars']:
+                    f_p[vname][:, :, :, ip] = buf_p[vname]
+                for vname in c['outvars_noise']:
+                    f_p[vname][:, :, :, ip] = buf_p_noise[vname]
 
     t_total = time.time() - t0
     print('  [%s] %d combos in %.0fs' % (corner, processed, t_total))
@@ -249,6 +290,11 @@ def main():
         idx = args.index('--outdir')
         args.pop(idx)
         outdir = args.pop(idx) if idx < len(args) else ''
+    srcdir = ''
+    if '--srcdir' in args:
+        idx = args.index('--srcdir')
+        args.pop(idx)
+        srcdir = args.pop(idx) if idx < len(args) else ''
     if '--voltage' in args:
         idx = args.index('--voltage')
         args.pop(idx)
@@ -280,12 +326,12 @@ def main():
             nL = len(c0['LENGTH'])
         l_range = (0, nL)
 
-    print('Voltage: %sV  Fine: %s  Outdir: %s  Workers: %d  L-range: %d-%d' %
-          (voltage, fine, outdir if outdir else '.', workers,
+    print('Voltage: %sV  Fine: %s  Outdir: %s  Srcdir: %s  Workers: %d  L-range: %d-%d' %
+          (voltage, fine, outdir if outdir else '.', srcdir if srcdir else '(same)', workers,
            l_range[0], l_range[1] - 1))
 
     t0 = time.time()
-    tasks = [(c, fine, outdir, l_range, voltage) for c in corners]
+    tasks = [(c, fine, outdir, l_range, voltage, srcdir if srcdir else None) for c in corners]
 
     if workers <= 1:
         results = [_worker(t) for t in tasks]

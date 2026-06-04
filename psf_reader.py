@@ -8,27 +8,32 @@ _read_all_traces_key = None
 
 def _parse_ascii_psf(filepath):
     traces_order, section, all_vals = [], "header", []
-    with open(filepath, encoding='latin-1') as fh:
-        for line in fh:
-            s = line.strip()
-            if not s: continue
-            if s in ("HEADER","TYPE","SWEEP","TRACE","VALUE"):
-                section = s.lower(); continue
-            if section == "trace":
-                parts = s.split(chr(34))
-                if len(parts) >= 3: traces_order.append(parts[1])
-            elif section == "value":
-                if s.startswith(chr(34)):
+    try:
+        with open(filepath, encoding='latin-1') as fh:
+            for line in fh:
+                s = line.strip()
+                if not s: continue
+                if s in ("HEADER","TYPE","SWEEP","TRACE","VALUE"):
+                    section = s.lower(); continue
+                if section == "trace":
                     parts = s.split(chr(34))
-                    name = parts[1] if len(parts) >= 2 else ""
-                    if name == "gs": continue
-                    if len(parts) >= 3:
-                        try: all_vals.append(float(parts[2].strip()))
-                        except ValueError: all_vals.append(0.0)
-    if not all_vals or not traces_order: return {}, 0
-    n_traces = len(traces_order)
-    n_points = len(all_vals) // n_traces
-    data = np.array(all_vals, dtype=np.float64).reshape(n_points, n_traces)
+                    if len(parts) >= 3: traces_order.append(parts[1])
+                elif section == "value":
+                    if s.startswith(chr(34)):
+                        parts = s.split(chr(34))
+                        name = parts[1] if len(parts) >= 2 else ""
+                        if name == "gs": continue
+                        if len(parts) >= 3:
+                            try: all_vals.append(float(parts[2].strip()))
+                            except ValueError: all_vals.append(0.0)
+        if not all_vals or not traces_order: return {}, 0
+        n_traces = len(traces_order)
+        n_points = len(all_vals) // n_traces
+        if n_points == 0 or len(all_vals) % n_traces != 0:
+            return {}, 0
+        data = np.array(all_vals[:n_points * n_traces], dtype=np.float64).reshape(n_points, n_traces)
+    except Exception:
+        return {}, 0
     result = {}
     for idx, name in enumerate(traces_order):
         result[name] = data[:, idx].copy()
@@ -114,15 +119,23 @@ def _parse_noise_psf(filepath):
                         except ValueError:
                             pass
                 if vals:
-                    result[name] = {}
+                    if name not in result or not isinstance(result[name], dict):
+                        result[name] = {}
+                        for fn in field_names:
+                            result[name][fn] = []
                     for fi, fname in enumerate(field_names):
                         if fi < len(vals):
-                            result[name][fname] = vals[fi]
+                            result[name][fname].append(vals[fi])
+                        else:
+                            result[name][fname].append(0.0)
             else:
                 try:
-                    result[name] = float(rest)
+                    val = float(rest)
                 except ValueError:
-                    result[name] = 0.0
+                    val = 0.0
+                if name not in result or isinstance(result[name], dict):
+                    result[name] = []
+                result[name].append(val)
     return result
 
 

@@ -7,7 +7,9 @@ from config_tsmc18 import get_config, write_netlist
 
 def run_sim_corner(args):
     corner, fine_flag, outdir, l_range = args
-    os.chdir(os.path.dirname(os.path.abspath(__file__)) or ".")
+    import tempfile
+    workdir = tempfile.mkdtemp(prefix='spec_work_', dir='/tmp')
+    os.chdir(workdir)
     from config_tsmc18 import get_config, write_netlist
     c = get_config(corner, coarse=not fine_flag)
 
@@ -28,6 +30,7 @@ def run_sim_corner(args):
            nVSB, n_jobs))
 
     t_start = time.time()
+    skipped = []
     for i in range(l_start, l_end):
         for j in range(nVSB):
             raw_dir = "%s/L%03d_%.3fum_VSB%03d_%+.2fV.raw" % (
@@ -48,11 +51,18 @@ def run_sim_corner(args):
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     timeout=300)
             if result.returncode != 0:
-                print('FAILED')
-                print(result.stderr.decode()[-400:])
-                return False
+                print('SKIPPED (crash)')
+                skipped.append('L=%.3fum VSB=%+.2fV' % (c['LENGTH'][i], c['VSB'][j]))
+                continue
             print('OK (%.1fs)' % (time.time() - t0))
+    if skipped:
+        with open('/tmp/sim_skipped.log', 'a') as fsk:
+            for s in skipped:
+                fsk.write('%s  %s\n' % (c['corner'], s))
+        print("  [%s] SKIPPED %d VSB points: %s" % (c['corner'], len(skipped), skipped))
     print("  [%s] done in %.0fs" % (c['corner'], time.time() - t_start))
+    import shutil
+    shutil.rmtree(workdir, ignore_errors=True)
     return True
 
 

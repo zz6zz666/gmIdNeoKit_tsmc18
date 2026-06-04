@@ -12,9 +12,6 @@ TSMC 180nm PDK 模拟电路设计自动化工具集（gm/ID 查找表生成 + GU
 
 ```
 .
-├── DATAGEN/                # 原始 MATLAB 参考脚本（Paul G.A. Jespers & Boris Murmann）
-│   ├── cornerSw_*          # 工艺角扫描配置与运行
-│   └── techSw_*            # 工艺切换配置、调试与运行
 ├── GUI/                    # PyQt5 GUI 应用（基于查找表的 MOS 尺寸规划与优化）
 │   ├── gmIdSizingGuiVp1.py # GUI 主程序
 │   ├── gmIdSizingGuiVp1.ui # Qt Designer UI 源文件
@@ -27,66 +24,92 @@ TSMC 180nm PDK 模拟电路设计自动化工具集（gm/ID 查找表生成 + GU
 │   ├── setup.iss           # Inno Setup 打包脚本
 │   ├── BUILD.md            # 构建命令说明
 │   └── README.org          # GUI 原始说明文档
+├── lookup_funs/            # Python 查找表查询 API 与使用文档
+│   ├── lookup_table.py     # 核心模块（LookupTable / lookup / lookupVGS / loadmat）
+│   ├── ekv_extract.py      # EKV 参数提取
+│   ├── xtract_demo.py      # EKV 提取示例
+│   ├── plot_demo.py        # gm/ID 绘图示例
+│   └── LOOKUP_README.md    # API 使用指南
+├── pipeline.sh             # 1.8V 器件逐 L 流水线（仿真 → 提取 → 清理）
+├── pipeline_5v.sh          # 5V 器件逐 L 流水线（仿真 → 提取 → 清理）
 ├── config_tsmc18.py        # 1.8V 器件扫描参数配置
 ├── config_tsmc18_5v.py     # 5V 器件扫描参数配置
 ├── run_sim.py              # 1.8V 器件 Spectre 并行仿真
 ├── run_sim_5v.py           # 5V 器件 Spectre 并行仿真
 ├── extract_new.py          # 统一数据提取脚本（1.8V + 5V），生成 .mat 查找表
 ├── psf_reader.py           # PSF 格式仿真结果读取器
-├── workflow.py             # **顶层一键脚本**：串联扫描 → 提取 → 清理全流程
 └── gmId_tsmc18_Demo.png    # 工具截图
 ```
 
 ## 运行环境
 
-| 组件                 | 环境要求                                                                  |
-| -------------------- | ------------------------------------------------------------------------- |
-| Spectre 扫描仿真     | VMware 虚拟机 + CentOS 6.5 + Cadence Virtuoso IC 6.1.7                    |
-| 数据提取 & .mat 生成 | Python 3.6.8（CentOS 6.5 上从源码编译安装）或 Windows 本地 Python         |
+| 组件                 | 环境要求                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| Spectre 扫描仿真     | VMware 虚拟机 + CentOS 6.5 + Cadence Virtuoso IC 6.1.7                             |
+| 数据提取 & .mat 生成 | Python 3.6.8（CentOS 6.5 上从源码编译安装）或 Windows 本地 Python                  |
 | GUI 应用             | 预构建安装包开箱即用（推荐）；或 Python 3.x + PyQt5, pyqtgraph, h5py, scipy, numpy |
+| 查找表 API           | Python 3.x + numpy, scipy, h5py                                                    |
+| Pipeline（推荐）     | Bash + Python + tmpfs（RAM disk），需要 root 权限挂载                              |
 
 > **注意**：CentOS 6.5 过于老旧，Python 3.6.8 需从源码编译。更高版本的 Python 理论上也可工作，但未完整测试。
 
+## 硬件需求
+
+| 项目           | 要求                                          |
+| -------------- | --------------------------------------------- |
+| 虚拟机内存     | ≥ 20 GB（推荐 24 GB）                        |
+| 宿主机内存     | 建议 ≥ 32 GB                                 |
+| 持久化磁盘     | ≥ 150 GB（.mat 文件总计约 135 GB）           |
+| Pipeline tmpfs | 1.8V: 13 GB / 5V: 16 GB（需从可用内存中分配） |
+
 ## 快速开始
 
-### 1. 顶层一键运行（推荐）
+### 1. Pipeline 一键运行（推荐）
 
-在虚拟机中执行 `workflow.py`，自动完成所有器件的扫描仿真 → 数据提取 → 原始文件清理：
+使用 `pipeline.sh` 和 `pipeline_5v.sh`，**逐 L 增量处理**——每级栅长 L 独立走完 仿真→提取→清理 流程，5 个工艺角并行。原始仿真数据放在 RAM disk 上，提取完即删除，不占用持久化磁盘。
 
 ```bash
-python workflow.py --outdir /path/to/output --fine --workers 5
+# 在虚拟机中执行（需要 root 权限以挂载 tmpfs）
+sudo bash pipeline.sh
+sudo bash pipeline_5v.sh
 ```
 
-可选参数：
-
-| 参数               | 说明                                     |
-| ------------------ | ---------------------------------------- |
-| `--outdir <dir>` | 输出目录（**必需**）               |
-| `--fine`         | 启用精细扫描模式（步长更小，数据量更大） |
-| `--workers <n>`  | 并行仿真/提取的进程数（默认 5）          |
-| `--skip-18v`     | 跳过 1.8V 器件                           |
-| `--skip-5v`      | 跳过 5V 器件                             |
+> 编辑脚本顶部的 `MATDIR` 变量可修改 .mat 输出目录，`RAMDIR` 变量指定 RAM disk 挂载点。
 
 ### 2. 分步运行
+
+也可手动分步执行。`extract_new.py` 支持 `--srcdir`（原始仿真数据目录）和 `--outdir`（.mat 输出目录）分离，适配 RAM disk 场景。
 
 #### Step 1 — 扫描仿真
 
 ```bash
-# 1.8V 器件
-python run_sim.py --corner tt --outdir /path/to/output
+# 1.8V 器件（指定 corner 和输出目录）
+python run_sim.py tt --fine --outdir /path/to/raw
 # 5V 器件
-python run_sim_5v.py --corner tt --outdir /path/to/output
+python run_sim_5v.py tt --fine --outdir /path/to/raw
 ```
 
 #### Step 2 — 数据提取
 
 ```bash
-# 提取 .mat 查找表（可在 Windows 本机执行，耗时约为虚拟机的 1/3 ）
-python extract_new.py --voltage 18 --fine --outdir /path/to/output --workers 5
-python extract_new.py --voltage 5v --fine --outdir /path/to/output --workers 5
+# 提取 .mat 查找表（可在 Windows 本机执行）
+python extract_new.py --voltage 18 --fine --srcdir /path/to/raw --outdir /path/to/mat --workers 5
+python extract_new.py --voltage 5v --fine --srcdir /path/to/raw --outdir /path/to/mat --workers 5
 ```
 
-#### Step 3 — 启动 GUI
+#### Step 3 — 使用查找表 API
+
+```python
+from lookup_funs.lookup_table import loadmat, lookup, lookupVGS
+
+nch = loadmat("D:\\tsmc18_lookup\\tsmc18-nch-tt.mat")
+gm_id = lookup(nch, 'GM_ID', 'VGS', 0.6, 'VDS', 0.9, 'L', 0.35)
+VGS   = lookupVGS(nch, 'GM_ID', 15, 'L', 0.35)
+```
+
+详细 API 文档见 `lookup_funs/LOOKUP_README.md`。
+
+#### Step 4 — 启动 GUI
 
 ```bash
 cd GUI
@@ -96,24 +119,28 @@ python runGmIdSizing.py
 
 ## 磁盘空间需求
 
-| 阶段                                           | 数据量              |
-| ---------------------------------------------- | ------------------- |
-| 1.8V 器件 (nch/pch) 精细仿真最终 .mat 文件     | ~4+ GB              |
-| 5V 器件 (nch_5v/pch_5v) 精细仿真最终 .mat 文件 | ~20 GB              |
-| 1.8V 器件原始仿真输出                          | ~90+ GB             |
-| 5V 器件原始仿真输出（单阶段）                  | ~140 GB / 阶段      |
-| **建议空闲磁盘空间**                     | **≥ 200 GB** |
+| 文件                                      | 大小                                  |
+| ----------------------------------------- | ------------------------------------- |
+| 1.8V 器件单 .mat 文件（nch 或 pch, fine） | ~4.44 GB / 个                         |
+| 1.8V 器件全部 .mat（5 corner × 2 type）  | ~44.4 GB                              |
+| 5V 器件单 .mat 文件（nch 或 pch, fine）   | ~9 GB / 个                            |
+| 5V 器件全部 .mat（5 corner × 2 type）    | ~89.8 GB                              |
+| **总计持久化磁盘需求**              | **≥ 150 GB**（含临时文件余量） |
+| Pipeline tmpfs（1.8V）                    | 13 GB（RAM disk，随 L 清理不累积）    |
+| Pipeline tmpfs（5V）                      | 16 GB（RAM disk，随 L 清理不累积）    |
 
-> `workflow.py` 已将 5V 器件扫描拆分为 3 个阶段，每阶段仿真完成后立即提取并删除原始文件，以节省磁盘占用。如果预算仍然紧张，可进一步拆分为更细粒度的阶段。
+> Pipeline 模式下原始仿真数据完全存放在 RAM disk（tmpfs）上，每个 L 提取完成后立刻删除，因此不占用持久化磁盘空间。.mat 文件大小的大幅增长源于精细 L 网格（1.8V: 12→51 点, 5V: 12→55/57 点）和更丰富的保存信号（22 个 OP 参数）。
 
 ## 性能说明
 
-| 环境                          | 说明                                         |
-| ----------------------------- | -------------------------------------------- |
-| 虚拟机完整流程                | 总计约 7~8 小时（扫描 + 提取均在虚拟机完成） |
-| 虚拟机扫描 + Windows 本地提取 | 可节省约 1~2 小时（提取耗时缩至 1/3）        |
+| 流程                                            | 仿真时间   |
+| ----------------------------------------------- | ---------- |
+| 1.8V 器件完整扫描（51 L × 17 VSB × 5 corner） | ~5.5 小时  |
+| 5V 器件完整扫描（57 L × 21 VSB × 5 corner）   | ~11.5 小时 |
 
-> **IO 瓶颈**：使用 VMware 共享文件夹作为输出目录会显著降低 IO 速度，导致提取解析耗时大幅延长。如果追求速度，建议将输出目录设在虚拟机内部磁盘（注意磁盘分区容量），仅在最终 .mat 文件完成后复制到 Windows。
+> **IO 瓶颈**：使用 VMware 共享文件夹（hgfs）作为输出目录会显著降低 IO 速度（耗时3x~10x），建议使用虚拟机内部磁盘或 tmpfs 作为原始数据暂存目录，仅在最终 .mat 文件完成后复制到 Windows。
+>
+> **RAM disk 模式**：`pipeline.sh` 通过 tmpfs 将原始仿真数据放在内存中，每 L 提取完即删除，大幅减少磁盘 IO。需确保虚拟机内存 ≥ 20 GB（建议 24 GB），宿主机可用内存 ≥ 32 GB。
 
 ## GUI 使用说明
 
@@ -150,9 +177,9 @@ python runGmIdSizing.py
 
 欢迎模拟电路设计相关探讨、问题反馈或功能建议。
 
-| 联系方式 | 信息 |
-| -------- | ---- |
-| 邮箱     | zz6zz666@qq.com |
-| QQ / 微信 | 1807651273 |
+| 联系方式  | 信息            |
+| --------- | --------------- |
+| 邮箱      | zz6zz666@qq.com |
+| QQ / 微信 | 1807651273      |
 
 — SEU ZZ

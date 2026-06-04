@@ -30,8 +30,8 @@ def get_config(corner="tt", coarse=True):
         c['VSB_step'] = 0.15
         c['VGS_max'] = 1.8
         c['VDS_max'] = 1.8
-        c['VSB_max'] = 0.3
-        c['LENGTH'] = np.arange(0.18, 0.25 + 0.07 / 2, 0.07)
+        c['VSB_max'] = 0.6
+        c['LENGTH'] = np.arange(18, 26, 7) / 100
         c['savefilen'] = f'tsmc18_coarse-nch-{corner}'
         c['savefilep'] = f'tsmc18_coarse-pch-{corner}'
     else:
@@ -40,8 +40,13 @@ def get_config(corner="tt", coarse=True):
         c['VSB_step'] = 0.1
         c['VGS_max'] = 1.8
         c['VDS_max'] = 1.8
-        c['VSB_max'] = 0.6
-        c['LENGTH'] = np.array([0.18,0.2,0.25,0.3,0.35,0.5,0.6,0.7,0.8,1.0,1.5,2.0])
+        c['VSB_max'] = 1.6
+        c['LENGTH'] = np.concatenate([
+            np.arange(18, 31) / 100,
+            np.array([0.325]),
+            np.arange(14, 41) / 40,
+            np.arange(11, 21) / 10,
+        ])
         c['savefilen'] = f'tsmc18-nch-{corner}'
         c['savefilep'] = f'tsmc18-pch-{corner}'
 
@@ -114,8 +119,12 @@ def get_config(corner="tt", coarse=True):
         f'//techsweep_tsmc18_{corner}.scs ' '\n'
         'include  %s\n'
         f'include "{c["paramfile"]}" ' '\n'
-        'save mn \n'
-        'save mp \n'
+        'save mn:ids mn:vth mn:igd mn:igs mn:gm mn:gmbs mn:gds '
+        'mn:cgg mn:cgs mn:cgd mn:cgb mn:cdd mn:cdg mn:css mn:csg mn:cjd mn:cjs '
+        'mn:fug mn:gmoverid mn:self_gain mn:vdsat\n'
+        'save mp:ids mp:vth mp:igd mp:igs mp:gm mp:gmbs mp:gds '
+        'mp:cgg mp:cgs mp:cgd mp:cgb mp:cdd mp:cdg mp:css mp:csg mp:cjd mp:cjs '
+        'mp:fug mp:gmoverid mp:self_gain mp:vdsat\n'
         'parameters gs=0 ds=0 \n'
         'vnoi     (vx  0)         vsource dc=0  \n'
         'vdsn     (vdn vx)        vsource dc=ds  \n'
